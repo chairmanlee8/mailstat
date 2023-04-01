@@ -2,10 +2,18 @@
 
 Command-line tool for analyzing an email inbox and producing various statistics.
 
-# Gmail
+## Gmail
 
 Must create a dedicated app password for use with less-secure apps on Gmail.  Prefer the use of a shell tool to manage
 passwords such as `pass` (https://www.passwordstore.org/).  The default shell command that mailstat uses is 
 `pass show mailstat/<email>`.
 
-See [https://github.com/soywod/himalaya/issues/442]
+Ensure that GPG_TTY is set so that the password input TUI can be shown.
+
+```
+GPG_TTY=$(tty)
+export GPG_TTY
+```
+
+- See [https://github.com/soywod/himalaya/issues/442](#442)
+- See [https://github.com/soywod/himalaya/issues/377](#377)

@@ -7,7 +7,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.70"
+chrono = "0.4.24"
 clap = { version = "4.2.1", features = ["derive"] }
 clap_derive = "4.2.0"
+email-address-parser = "1.0.3"
 himalaya-lib = "0.6.0"
 tokio = { version = "1.27.0", features = ["full"] }

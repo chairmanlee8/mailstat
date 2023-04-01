@@ -1,6 +1,7 @@
 use anyhow::Result;
+use chrono::{Days, Local};
 use clap::Parser;
-use himalaya_lib::{AccountConfig, BackendBuilder, BackendConfig, ImapConfig};
+use himalaya_lib::{AccountConfig, BackendBuilder, BackendConfig, Envelopes, ImapConfig};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -9,6 +10,12 @@ struct Args {
     email: String,
     #[arg(short, long)]
     passwd_cmd: Option<String>,
+    #[arg(long, default_value = "imap.gmail.com")]
+    imap_host: String,
+    #[arg(long, default_value = "993")]
+    imap_port: u16,
+    #[arg(short, long, default_value = "7")]
+    days: u64,
 }
 
 #[tokio::main]
@@ -22,8 +29,8 @@ async fn main() -> Result<()> {
         ..Default::default()
     };
     let imap_cfg = ImapConfig {
-        host: "imap.gmail.com".to_string(),
-        port: 993,
+        host: args.imap_host,
+        port: args.imap_port,
         login: args.email.clone(),
         passwd_cmd,
         ..Default::default()
@@ -32,7 +39,23 @@ async fn main() -> Result<()> {
     let backend = BackendBuilder::new()
         .build(&account_cfg, &backend_cfg)
         .unwrap();
-    let envelopes = backend.list_envelopes("INBOX", 10, 0).unwrap();
+    let until = Local::now().checked_sub_days(Days::new(args.days)).unwrap();
+    let mut envelopes = Envelopes::default();
+    let mut i = 0;
+    loop {
+        println!("Loading page {}...", i);
+        let mut page = backend.list_envelopes("INBOX", 100, i).unwrap();
+        if page.is_empty() {
+            break;
+        }
+        envelopes.append(&mut page);
+        if let Some(envelope) = envelopes.last() {
+            if envelope.date < until {
+                break;
+            }
+        }
+        i += 1;
+    }
     for envelope in envelopes.iter() {
         println!("{:?}", envelope);
     }
