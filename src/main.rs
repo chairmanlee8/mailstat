@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::{Days, Local};
 use clap::Parser;
+use email_address_parser::EmailAddress;
 use himalaya_lib::{AccountConfig, BackendBuilder, BackendConfig, Envelopes, ImapConfig};
 
 #[derive(Parser, Debug)]
@@ -43,7 +44,7 @@ async fn main() -> Result<()> {
     let mut envelopes = Envelopes::default();
     let mut i = 0;
     loop {
-        println!("Loading page {}...", i);
+        eprintln!("Loading page {}...", i);
         let mut page = backend.list_envelopes("INBOX", 100, i).unwrap();
         if page.is_empty() {
             break;
@@ -56,8 +57,13 @@ async fn main() -> Result<()> {
         }
         i += 1;
     }
+    println!("timestamp,from_domain");
     for envelope in envelopes.iter() {
-        println!("{:?}", envelope);
+        if envelope.date < until {
+            break;
+        }
+        let sender = EmailAddress::parse(&envelope.from.addr, None).unwrap();
+        println!("{},{}", envelope.date.to_rfc3339(), sender.get_domain());
     }
     Ok(())
 }
