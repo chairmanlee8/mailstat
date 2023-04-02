@@ -51,19 +51,26 @@ async fn main() -> Result<()> {
         }
         envelopes.append(&mut page);
         if let Some(envelope) = envelopes.last() {
+            eprintln!("Last date: {}", envelope.date);
             if envelope.date < until {
                 break;
             }
         }
         i += 1;
     }
-    println!("timestamp,from_domain");
+    eprintln!("Loaded {} envelopes", envelopes.len());
+    println!("timestamp,message_id,from_domain");
     for envelope in envelopes.iter() {
         if envelope.date < until {
-            break;
+            continue;
         }
         let sender = EmailAddress::parse(&envelope.from.addr, None).unwrap();
-        println!("{},{}", envelope.date.to_rfc3339(), sender.get_domain());
+        println!(
+            "{},{},{}",
+            envelope.date.to_rfc3339(),
+            envelope.message_id,
+            sender.get_domain()
+        );
     }
     Ok(())
 }
