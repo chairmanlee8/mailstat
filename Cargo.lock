@@ -1342,6 +1342,7 @@ dependencies = [
  "clap_derive",
  "email-address-parser",
  "himalaya-lib",
+ "once_cell",
  "plotters",
  "serde",
  "serde_json",

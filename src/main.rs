@@ -1,14 +1,18 @@
 use anyhow::Result;
-use chrono::{DateTime, Days, Local, Utc};
+use chrono::{DateTime, Datelike, Days, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
 use clap::Parser;
 use email_address_parser::EmailAddress;
 use himalaya_lib::{AccountConfig, BackendBuilder, BackendConfig, Envelope, ImapConfig};
+use once_cell::sync::Lazy;
 use plotters::prelude::*;
 use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use std::iter::Map;
+
+static CLEARLY_ERRONEOUS_DATE: Lazy<DateTime<FixedOffset>> =
+    Lazy::new(|| DateTime::parse_from_rfc3339("1980-01-01T00:00:00+00:00").unwrap());
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -21,7 +25,7 @@ struct Args {
     imap_host: String,
     #[arg(long, default_value = "993")]
     imap_port: u16,
-    #[arg(short, long, default_value = "7")]
+    #[arg(short, long, default_value = "14")]
     days: u64,
     #[arg(long)]
     cache: Option<String>,
@@ -61,7 +65,6 @@ async fn main() -> Result<()> {
     let message_count = message_ids.len();
     println!("Messages cached: {}", message_count);
     let mut i = 0;
-    let clearly_erroneous_date = DateTime::parse_from_rfc3339("1980-01-01T00:00:00+00:00").unwrap();
     'outer: loop {
         if let Some(entry) = entries.last() {
             eprintln!("Last date: {}", entry.date);
@@ -72,7 +75,7 @@ async fn main() -> Result<()> {
             break;
         }
         for envelope in page.iter() {
-            if envelope.date < clearly_erroneous_date {
+            if envelope.date < *CLEARLY_ERRONEOUS_DATE {
                 eprintln!("Skipping clearly erroneous envelope: {:?}", envelope);
                 continue;
             }
@@ -97,13 +100,18 @@ async fn main() -> Result<()> {
     }
     print_counts_by_date(&entries);
     print_counts_by_domain(&entries);
+    graph_counts_by_date(&entries);
     Ok(())
 }
 
-fn count_by_date(entries: &[Entry]) -> HashMap<String, usize> {
-    let mut counts: HashMap<String, usize> = HashMap::new();
+fn count_by_date(entries: &[Entry]) -> HashMap<NaiveDate, usize> {
+    let mut counts: HashMap<NaiveDate, usize> = HashMap::new();
     for entry in entries.iter() {
-        let date = entry.date.format("%Y-%m-%d").to_string();
+        if entry.date < *CLEARLY_ERRONEOUS_DATE {
+            continue;
+        }
+        let date = NaiveDate::from_ymd_opt(entry.date.year(), entry.date.month(), entry.date.day())
+            .unwrap();
         let count = counts.entry(date).or_insert(0);
         *count += 1;
     }
@@ -116,6 +124,27 @@ fn print_counts_by_date(entries: &[Entry]) {
     for (date, count) in counts.iter() {
         println!("{},{}", date, count);
     }
+}
+
+fn graph_counts_by_date(entries: &[Entry]) {
+    let mut counts: Vec<(NaiveDate, usize)> = count_by_date(entries).into_iter().collect();
+    counts.sort();
+    let min_date = counts.first().unwrap().0;
+    let max_date = counts.last().unwrap().0;
+    let max_count = *counts.iter().map(|(_, c)| c).max().unwrap();
+    let root = BitMapBackend::new("var/count-by-date.png", (1024, 768)).into_drawing_area();
+    root.fill(&WHITE).unwrap();
+    let mut chart = ChartBuilder::on(&root)
+        .caption("Emails by date", ("sans-serif", 20).into_font())
+        .margin(5)
+        .x_label_area_size(30)
+        .y_label_area_size(30)
+        .build_cartesian_2d(min_date..max_date, 0..max_count)
+        .unwrap();
+    chart.configure_mesh().draw().unwrap();
+    chart
+        .draw_series(LineSeries::new(counts.iter().map(|(d, c)| (*d, *c)), &RED))
+        .unwrap();
 }
 
 fn count_by_domain(entries: &[Entry]) -> HashMap<String, usize> {
