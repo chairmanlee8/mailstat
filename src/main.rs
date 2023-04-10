@@ -3,10 +3,12 @@ use chrono::{DateTime, Days, Local, Utc};
 use clap::Parser;
 use email_address_parser::EmailAddress;
 use himalaya_lib::{AccountConfig, BackendBuilder, BackendConfig, Envelope, ImapConfig};
+use plotters::prelude::*;
 use serde::{Deserialize, Serialize, Serializer};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
+use std::iter::Map;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -59,7 +61,8 @@ async fn main() -> Result<()> {
     let message_count = message_ids.len();
     println!("Messages cached: {}", message_count);
     let mut i = 0;
-    loop {
+    let clearly_erroneous_date = DateTime::parse_from_rfc3339("1980-01-01T00:00:00+00:00").unwrap();
+    'outer: loop {
         if let Some(entry) = entries.last() {
             eprintln!("Last date: {}", entry.date);
         }
@@ -69,8 +72,12 @@ async fn main() -> Result<()> {
             break;
         }
         for envelope in page.iter() {
+            if envelope.date < clearly_erroneous_date {
+                eprintln!("Skipping clearly erroneous envelope: {:?}", envelope);
+                continue;
+            }
             if envelope.date < until {
-                break;
+                break 'outer;
             }
             if !message_ids.contains(&envelope.message_id) {
                 entries.push(envelope.into());
@@ -84,25 +91,50 @@ async fn main() -> Result<()> {
         entries.len(),
         message_ids.len() - message_count
     );
-    // println!("{:#?}", entries);
     if let Some(cache_file) = &args.cache {
         eprintln!("Saving to cache file {}...", cache_file);
         save_to_cache(cache_file, &entries).await?;
     }
-    // println!("timestamp,message_id,from_domain");
-    // for envelope in envelopes.iter() {
-    //     if envelope.date < until {
-    //         continue;
-    //     }
-    //     let sender = EmailAddress::parse(&envelope.from.addr, None).unwrap();
-    //     println!(
-    //         "{},{},{}",
-    //         envelope.date.to_rfc3339(),
-    //         envelope.message_id,
-    //         sender.get_domain()
-    //     );
-    // }
+    print_counts_by_date(&entries);
+    print_counts_by_domain(&entries);
     Ok(())
+}
+
+fn count_by_date(entries: &[Entry]) -> HashMap<String, usize> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for entry in entries.iter() {
+        let date = entry.date.format("%Y-%m-%d").to_string();
+        let count = counts.entry(date).or_insert(0);
+        *count += 1;
+    }
+    counts
+}
+
+fn print_counts_by_date(entries: &[Entry]) {
+    let counts = count_by_date(entries);
+    println!("date,count");
+    for (date, count) in counts.iter() {
+        println!("{},{}", date, count);
+    }
+}
+
+fn count_by_domain(entries: &[Entry]) -> HashMap<String, usize> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for entry in entries.iter() {
+        let sender = EmailAddress::parse(&entry.from_addr, None).unwrap();
+        let domain = sender.get_domain().to_string();
+        let count = counts.entry(domain).or_insert(0);
+        *count += 1;
+    }
+    counts
+}
+
+fn print_counts_by_domain(entries: &[Entry]) {
+    let counts = count_by_domain(entries);
+    println!("domain,count");
+    for (domain, count) in counts.iter() {
+        println!("{},{}", domain, count);
+    }
 }
 
 fn serialize_date<S: Serializer>(date: &DateTime<Local>, s: S) -> Result<S::Ok, S::Error> {
