@@ -2,6 +2,11 @@
 
 Command-line tool for analyzing an email inbox and producing various statistics.
 
+## TODO
+
+- Finish composing email
+- Figure out how to work launchd
+
 ## Issues
 
 - DateTime parsing is wrong, value from Gmail is actually Utc not Local
