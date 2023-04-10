@@ -2,6 +2,10 @@
 
 Command-line tool for analyzing an email inbox and producing various statistics.
 
+## Issues
+
+- DateTime parsing is wrong, value from Gmail is actually Utc not Local
+
 ## Gmail
 
 Must create a dedicated app password for use with less-secure apps on Gmail.  Prefer the use of a shell tool to manage

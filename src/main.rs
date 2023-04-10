@@ -1,15 +1,20 @@
 use anyhow::Result;
-use chrono::{DateTime, Datelike, Days, FixedOffset, Local, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, Datelike, Days, FixedOffset, Local, NaiveDate};
 use clap::Parser;
 use email_address_parser::EmailAddress;
-use himalaya_lib::{AccountConfig, BackendBuilder, BackendConfig, Envelope, ImapConfig};
+use himalaya_lib::EmailSender::Smtp;
+use himalaya_lib::{
+    AccountConfig, BackendBuilder, BackendConfig, Email, Envelope, ImapConfig, SenderBuilder,
+    SmtpConfig, TplBuilder,
+};
+use lettre::message::{Attachment, Body, MultiPart, SinglePart};
+use lettre::Message;
 use once_cell::sync::Lazy;
 use plotters::prelude::*;
 use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
-use std::iter::Map;
 
 static CLEARLY_ERRONEOUS_DATE: Lazy<DateTime<FixedOffset>> =
     Lazy::new(|| DateTime::parse_from_rfc3339("1980-01-01T00:00:00+00:00").unwrap());
@@ -19,8 +24,6 @@ static CLEARLY_ERRONEOUS_DATE: Lazy<DateTime<FixedOffset>> =
 struct Args {
     #[arg(short, long)]
     email: String,
-    #[arg(short, long)]
-    passwd_cmd: Option<String>,
     #[arg(long, default_value = "imap.gmail.com")]
     imap_host: String,
     #[arg(long, default_value = "993")]
@@ -34,18 +37,24 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let passwd_cmd = args
-        .passwd_cmd
-        .unwrap_or_else(|| format!("pass show mailstat/{}", args.email));
     let account_cfg = AccountConfig {
         email: args.email.clone(),
+        email_sender: Smtp(SmtpConfig {
+            host: "smtp.gmail.com".to_string(),
+            port: 587,
+            ssl: Some(true),
+            starttls: Some(true),
+            insecure: Some(false),
+            login: args.email.clone(),
+            passwd_cmd: format!("pass show mailstat/{}", args.email),
+        }),
         ..Default::default()
     };
     let imap_cfg = ImapConfig {
         host: args.imap_host,
         port: args.imap_port,
         login: args.email.clone(),
-        passwd_cmd,
+        passwd_cmd: format!("pass show mailstat/{}", args.email),
         ..Default::default()
     };
     let backend_cfg = BackendConfig::Imap(imap_cfg);
@@ -98,15 +107,31 @@ async fn main() -> Result<()> {
         eprintln!("Saving to cache file {}...", cache_file);
         save_to_cache(cache_file, &entries).await?;
     }
-    print_counts_by_date(&entries);
-    print_counts_by_domain(&entries);
-    graph_counts_by_date(&entries);
+    print_counts_by_date(entries.iter().filter(|e| e.date > until));
+    // print_counts_by_domain(&entries);
+    graph_counts_by_date(entries.iter());
+    let mut sender = SenderBuilder::build(&account_cfg).unwrap();
+    let image_by_date = std::fs::read("var/count-by-date.png")?;
+    let image_by_date_body = Body::new(image_by_date);
+    let email = Message::builder()
+        .from(args.email.parse().unwrap())
+        .to(args.email.parse().unwrap())
+        .subject("mailstat report")
+        .multipart(
+            MultiPart::mixed()
+                .singlepart(SinglePart::plain("See attachment".to_string()))
+                .singlepart(
+                    Attachment::new("count-by-date.png".to_string())
+                        .body(image_by_date_body, "image/png".parse().unwrap()),
+                ),
+        )?;
+    sender.send(&email.formatted()).unwrap();
     Ok(())
 }
 
-fn count_by_date(entries: &[Entry]) -> HashMap<NaiveDate, usize> {
+fn count_by_date<'a>(entries: impl Iterator<Item = &'a Entry>) -> Vec<(NaiveDate, usize)> {
     let mut counts: HashMap<NaiveDate, usize> = HashMap::new();
-    for entry in entries.iter() {
+    for entry in entries {
         if entry.date < *CLEARLY_ERRONEOUS_DATE {
             continue;
         }
@@ -115,20 +140,21 @@ fn count_by_date(entries: &[Entry]) -> HashMap<NaiveDate, usize> {
         let count = counts.entry(date).or_insert(0);
         *count += 1;
     }
-    counts
+    let mut sorted: Vec<(NaiveDate, usize)> = counts.into_iter().collect();
+    sorted.sort();
+    sorted
 }
 
-fn print_counts_by_date(entries: &[Entry]) {
+fn print_counts_by_date<'a>(entries: impl Iterator<Item = &'a Entry>) {
     let counts = count_by_date(entries);
     println!("date,count");
     for (date, count) in counts.iter() {
-        println!("{},{}", date, count);
+        println!("{},{},{}", date, date.weekday(), count);
     }
 }
 
-fn graph_counts_by_date(entries: &[Entry]) {
-    let mut counts: Vec<(NaiveDate, usize)> = count_by_date(entries).into_iter().collect();
-    counts.sort();
+fn graph_counts_by_date<'a>(entries: impl Iterator<Item = &'a Entry>) {
+    let counts = count_by_date(entries);
     let min_date = counts.first().unwrap().0;
     let max_date = counts.last().unwrap().0;
     let max_count = *counts.iter().map(|(_, c)| c).max().unwrap();
