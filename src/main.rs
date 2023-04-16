@@ -126,7 +126,10 @@ async fn main() -> Result<()> {
             .subject("mailstat report")
             .multipart(
                 MultiPart::mixed()
-                    .singlepart(SinglePart::plain(table_by_domain.to_string()))
+                    .singlepart(SinglePart::html(format!(
+                        "<pre>{}</pre>",
+                        table_by_domain.to_string()
+                    )))
                     .singlepart(
                         Attachment::new("count-by-date.png".to_string())
                             .body(image_by_date_body, "image/png".parse().unwrap()),
