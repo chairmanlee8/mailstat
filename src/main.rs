@@ -2,19 +2,23 @@ use anyhow::Result;
 use chrono::{DateTime, Datelike, Days, FixedOffset, Local, NaiveDate};
 use clap::Parser;
 use email_address_parser::EmailAddress;
-use himalaya_lib::EmailSender::Smtp;
 use himalaya_lib::{
-    AccountConfig, BackendBuilder, BackendConfig, Email, Envelope, ImapConfig, SenderBuilder,
-    SmtpConfig, TplBuilder,
+    AccountConfig, BackendBuilder, BackendConfig, EmailSender::Smtp, Envelope, ImapConfig,
+    SenderBuilder, SmtpConfig,
 };
-use lettre::message::{Attachment, Body, MultiPart, SinglePart};
-use lettre::Message;
+use lettre::{
+    message::{Attachment, Body, MultiPart, SinglePart},
+    Message,
+};
 use once_cell::sync::Lazy;
 use plotters::prelude::*;
+use prettytable::{format, row, Table};
 use serde::{Deserialize, Serialize, Serializer};
-use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::Write;
+use std::{
+    collections::{HashMap, HashSet},
+    fs::File,
+    io::Write,
+};
 
 static CLEARLY_ERRONEOUS_DATE: Lazy<DateTime<FixedOffset>> =
     Lazy::new(|| DateTime::parse_from_rfc3339("1980-01-01T00:00:00+00:00").unwrap());
@@ -32,6 +36,8 @@ struct Args {
     days: u64,
     #[arg(long)]
     cache: Option<String>,
+    #[arg(long)]
+    send_report_to_email: bool,
 }
 
 #[tokio::main]
@@ -108,24 +114,26 @@ async fn main() -> Result<()> {
         save_to_cache(cache_file, &entries).await?;
     }
     print_counts_by_date(entries.iter().filter(|e| e.date > until));
-    // print_counts_by_domain(&entries);
+    let table_by_domain = table_counts_by_domain(entries.iter().filter(|e| e.date > until));
     graph_counts_by_date(entries.iter());
-    let mut sender = SenderBuilder::build(&account_cfg).unwrap();
-    let image_by_date = std::fs::read("var/count-by-date.png")?;
-    let image_by_date_body = Body::new(image_by_date);
-    let email = Message::builder()
-        .from(args.email.parse().unwrap())
-        .to(args.email.parse().unwrap())
-        .subject("mailstat report")
-        .multipart(
-            MultiPart::mixed()
-                .singlepart(SinglePart::plain("See attachment".to_string()))
-                .singlepart(
-                    Attachment::new("count-by-date.png".to_string())
-                        .body(image_by_date_body, "image/png".parse().unwrap()),
-                ),
-        )?;
-    sender.send(&email.formatted()).unwrap();
+    if args.send_report_to_email {
+        let mut sender = SenderBuilder::build(&account_cfg).unwrap();
+        let image_by_date = std::fs::read("var/count-by-date.png")?;
+        let image_by_date_body = Body::new(image_by_date);
+        let email = Message::builder()
+            .from(args.email.parse().unwrap())
+            .to(args.email.parse().unwrap())
+            .subject("mailstat report")
+            .multipart(
+                MultiPart::mixed()
+                    .singlepart(SinglePart::plain(table_by_domain.to_string()))
+                    .singlepart(
+                        Attachment::new("count-by-date.png".to_string())
+                            .body(image_by_date_body, "image/png".parse().unwrap()),
+                    ),
+            )?;
+        sender.send(&email.formatted()).unwrap();
+    }
     Ok(())
 }
 
@@ -173,9 +181,9 @@ fn graph_counts_by_date<'a>(entries: impl Iterator<Item = &'a Entry>) {
         .unwrap();
 }
 
-fn count_by_domain(entries: &[Entry]) -> HashMap<String, usize> {
+fn count_by_domain<'a>(entries: impl Iterator<Item = &'a Entry>) -> HashMap<String, usize> {
     let mut counts: HashMap<String, usize> = HashMap::new();
-    for entry in entries.iter() {
+    for entry in entries {
         let sender = EmailAddress::parse(&entry.from_addr, None).unwrap();
         let domain = sender.get_domain().to_string();
         let count = counts.entry(domain).or_insert(0);
@@ -184,12 +192,19 @@ fn count_by_domain(entries: &[Entry]) -> HashMap<String, usize> {
     counts
 }
 
-fn print_counts_by_domain(entries: &[Entry]) {
+fn table_counts_by_domain<'a>(entries: impl Iterator<Item = &'a Entry>) -> Table {
     let counts = count_by_domain(entries);
-    println!("domain,count");
+    let mut counts: Vec<_> = counts.into_iter().collect();
+    counts.sort_by_key(|(_, c)| *c);
+    counts.reverse();
+    let mut table = Table::new();
+    table.set_titles(row!["domain", "count"]);
     for (domain, count) in counts.iter() {
-        println!("{},{}", domain, count);
+        table.add_row(row![domain, count]);
     }
+    table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+    table.printstd();
+    table
 }
 
 fn serialize_date<S: Serializer>(date: &DateTime<Local>, s: S) -> Result<S::Ok, S::Error> {
