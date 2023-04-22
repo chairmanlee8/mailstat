@@ -2,9 +2,22 @@
 
 Command-line tool for analyzing an email inbox and producing various statistics.
 
+With Gmail (see notes on Gmail):
+```shell
+cargo run -- --email ***@gmail.com --cache tmp/***.json --days 14
+```
+
+With Protonmail Bridge:
+```shell
+cargo run -- --email ***@proton.me --cache var/***.json --days 14 \
+    --imap-host 127.0.0.1 --imap-port 1143 --imap-starttls \
+    --smtp-host 127.0.0.1 --smtp-port 102
+```
+
 ## TODO
 
-- Finish composing email
+- Fork himalaya->imap->imap-proto to support stupid mu character in ProtonMail bridge
+- Complain about the above to protonmail bridge repo
 - Figure out how to work launchd
 
 ## Issues

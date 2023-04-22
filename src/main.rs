@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Datelike, Days, FixedOffset, Local, NaiveDate};
 use clap::Parser;
 use email_address_parser::EmailAddress;
+use env_logger;
 use himalaya_lib::{
     AccountConfig, BackendBuilder, BackendConfig, EmailSender::Smtp, Envelope, ImapConfig,
     SenderBuilder, SmtpConfig,
@@ -32,6 +33,12 @@ struct Args {
     imap_host: String,
     #[arg(long, default_value = "993")]
     imap_port: u16,
+    #[arg(long)]
+    imap_starttls: bool,
+    #[arg(long, default_value = "smtp.gmail.com")]
+    smtp_host: String,
+    #[arg(long, default_value = "587")]
+    smtp_port: u16,
     #[arg(short, long, default_value = "14")]
     days: u64,
     #[arg(long)]
@@ -42,12 +49,13 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
     let args = Args::parse();
     let account_cfg = AccountConfig {
         email: args.email.clone(),
         email_sender: Smtp(SmtpConfig {
-            host: "smtp.gmail.com".to_string(),
-            port: 587,
+            host: args.smtp_host,
+            port: args.smtp_port,
             ssl: Some(true),
             starttls: Some(true),
             insecure: Some(false),
@@ -59,6 +67,7 @@ async fn main() -> Result<()> {
     let imap_cfg = ImapConfig {
         host: args.imap_host,
         port: args.imap_port,
+        starttls: Some(args.imap_starttls),
         login: args.email.clone(),
         passwd_cmd: format!("pass show mailstat/{}", args.email),
         ..Default::default()
@@ -80,6 +89,8 @@ async fn main() -> Result<()> {
     let message_count = message_ids.len();
     println!("Messages cached: {}", message_count);
     let mut i = 0;
+    // let folders = backend.list_folders()?;
+    // println!("Folders: {:#?}", folders);
     'outer: loop {
         if let Some(entry) = entries.last() {
             eprintln!("Last date: {}", entry.date);
